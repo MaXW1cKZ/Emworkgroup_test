@@ -21,7 +21,7 @@
 > ต้องจัดการกรณีที่บางร้านไม่มีออเดอร์เลย
 > ต้องใช้ Window Function เพื่อจัดอันดับภายในกลุ่ม
 
-ใช้ LEFT JOIN เพื่อให้ร้านที่ไม่มีออเดอร์เลยไม่หลุดโผไป (จะแสดงค่าเป็น 0 ด้วย COALESCE) และใช้ DENSE_RANK จัดอันดับในแต่ละ Category (PARTITION BY category)
+ใช้ LEFT JOIN เพื่อให้ร้านที่ไม่มีออเดอร์เลย (จะแสดงค่าเป็น 0 ด้วย COALESCE) และใช้ DENSE_RANK จัดอันดับในแต่ละ Category (PARTITION BY category)
 
 ### ข้อ 3: Code Review — Inventory Race Condition
 
@@ -179,8 +179,7 @@ ETA ต้องไม่น้อยกว่า 30 นาที
 
 **1. Architecture Diagram (การไหลของข้อมูล)**
 
-<img width="446" height="341" alt="Architecture" src="https://github.com/user-attachments/assets/714e27fd-3e4c-468b-9249-9a1f0b5b485c" />
-
+<img width="443" height="651" alt="Architecture" src="https://github.com/user-attachments/assets/d1495193-6848-4455-98e4-f9c40416c4a8" />
 
 **2. Safety & Ethics (การตั้ง Guardrails คุ้มครองผู้บริโภค)**
 ป้องกันเหตุการณ์ AI ตัดสินใจตั้งราคาแพงเกินไปจนผิดกฎหมาย โดยฝัง Rule ไว้ที่ Backend Layer ซึ่ง AI ไม่สามารถ Overwrite ได้:
