@@ -25,6 +25,29 @@
 
 > **โจทย์:** จงแก้ไข Code ต่อไปนี้ที่ใช้ตัดสต็อกเมื่อมีการสั่งซื้อ: ระบุปัญหา N+1 Query, Race Condition (สต็อกติดลบ), และการขาด Transaction พร้อมเขียน Code ใหม่ที่ใช้ Atomic Update หรือ Pessimistic Locking
 
+
+async function placeOrder(orderId, items) {
+   
+    for (const item of items) {
+
+        const product = await db.query(
+
+            `SELECT stock FROM menu WHERE id = ${item.id}`),
+
+        if (product.stock >= item.qty) {
+
+            await db.query(
+
+                `UPDATE menu SET stock = stock - ${item.qty} WHERE id = ${item.id}`),
+
+        }
+
+    }
+
+    await Order.create({ id: orderId, status: 'confirmed' });
+
+}
+
 * **ปัญหาในโค้ดเดิม:** 
 1. **N+1 Query:** โค้ดมีการรันคำสั่ง SELECT และ UPDATE ใน for loop ถ้าลูกค้าสั่ง 10 ชิ้น มันจะวิ่งไปหา Database 20 รอบ ทำให้ช้ามาก
 2. **ขาด Transaction:** หากสินค้าชิ้นที่ 1 หักสต็อกผ่าน แต่ชิ้นที่ 2 สต็อกไม่พอ ระบบจะค้างเติ่ง โดยที่ชิ้นแรกถูกหักไปฟรีๆ แต่สร้างออเดอร์ไม่สำเร็จ ข้อมูลไม่สอดคล้องกัน (Inconsistent Data)
