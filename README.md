@@ -21,6 +21,8 @@
 > ต้องจัดการกรณีที่บางร้านไม่มีออเดอร์เลย
 > ต้องใช้ Window Function เพื่อจัดอันดับภายในกลุ่ม
 
+ใช้ LEFT JOIN เพื่อให้ร้านที่ไม่มีออเดอร์เลยไม่หลุดโผไป (จะแสดงค่าเป็น 0 ด้วย COALESCE) และใช้ DENSE_RANK จัดอันดับในแต่ละ Category (PARTITION BY category)
+
 ### ข้อ 3: Code Review — Inventory Race Condition
 
 > **โจทย์:** จงแก้ไข Code ต่อไปนี้ที่ใช้ตัดสต็อกเมื่อมีการสั่งซื้อ: ระบุปัญหา N+1 Query, Race Condition (สต็อกติดลบ), และการขาด Transaction พร้อมเขียน Code ใหม่ที่ใช้ Atomic Update หรือ Pessimistic Locking
