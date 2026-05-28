@@ -1,105 +1,136 @@
+## ส่วนที่ 1 — Technical Mastery & Scalability
+
+*(รายละเอียดโค้ดแบบเต็มอยู่ในไฟล์ `.js` และ `.sql`)*
+
+### ข้อ 1: Smart & Stale Rider Assignment
+
+> **โจทย์:** จงเขียนฟังก์ชัน assignRider(order, riders) เพื่อหา Rider ที่เหมาะสมที่สุด โดยมีเงื่อนไข:
+> Distance: ใช้สูตร Haversine คำนวณระยะทางจาก Rider ถึงร้านอาหาร
+> Stale Data Protection: ห้ามเลือก Rider ที่ไม่ได้อัปเดตพิกัดเกิน 2 นาที
+> Tie-breaker: ถ้าระยะทางต่างกันไม่เกิน 500 เมตร ให้เลือกคนที่มี Rating สูงกว่า
+> Edge Case: หากไม่มี Rider ในระยะ 5 กม. เลย ระบบควรทำอย่างไร? อธิบาย Logic การขยายรัศมีหรือ Fallback
+
+* **Logic:** 1. กรอง Rider ที่ `last_updated` เกิน 2 นาทีทิ้ง (Stale Data Protection)
+2. คำนวณระยะทางด้วยสูตร Haversine และจัดเรียงจากใกล้ไปไกล
+3. หากมี Rider ที่ระยะทางสูสีกัน (ต่างกันไม่เกิน 500m) ระบบจะใช้เงื่อนไข Rating ที่สูงกว่าเป็นตัวตัดสิน (Tie-breaker)
+* **Edge Case:** หากไม่มี Rider ในระยะ 5 กม. ระบบจะใช้ Logic "Radius Expansion" ขยายรัศมีการค้นหาเป็น 8 กม. และ 10 กม. ตามลำดับ หากถึง 10 กม. แล้วยังหาไม่ได้ จะเข้าสู่ระบบ Fallback ทันที เช่น โยนออเดอร์ให้ 3rd Party Logistics (Grab/Lalamove) หรือส่ง Notification แจ้งลูกค้ายกเลิกออเดอร์พร้อมมอบคูปองชดเชย
+
+### ข้อ 2: SQL — Revenue Attribution & Ranking
+
+> **โจทย์:** จงเขียน SQL เพื่อหา "ร้านอาหารที่มีมูลค่าคำสั่งซื้อเฉลี่ย (AOV) สูงสุด 3 อันดับแรกในแต่ละ Category" โดย:
+> นับเฉพาะออเดอร์ที่ status = 'delivered' ในเดือนปัจจุบันเท่านั้น
+> ต้องจัดการกรณีที่บางร้านไม่มีออเดอร์เลย
+> ต้องใช้ Window Function เพื่อจัดอันดับภายในกลุ่ม
+
+* **Logic:** 1. ใช้ `LEFT JOIN` เริ่มจากตารางร้านอาหารไปหาออเดอร์ เพื่อให้ร้านที่ไม่มีออเดอร์เลยยังคงแสดงผลใน Query
+2. ใช้ `COALESCE(AVG(order_total), 0)` เพื่อบังคับให้ร้านที่ไม่มีออเดอร์แสดงยอด AOV เป็น 0
+3. ใส่เงื่อนไข `WHERE status = 'delivered'` และกรองเฉพาะเดือนปัจจุบัน
+4. ใช้ Window Function `DENSE_RANK() OVER (PARTITION BY category_id ORDER BY aov DESC)` เพื่อจัด 3 อันดับแรกของแต่ละ Category โดยที่ไม่ข้ามลำดับหากมีคะแนนเสมอกัน
+
+### ข้อ 3: Code Review — Inventory Race Condition
+
+> **โจทย์:** จงแก้ไข Code ต่อไปนี้ที่ใช้ตัดสต็อกเมื่อมีการสั่งซื้อ: ระบุปัญหา N+1 Query, Race Condition (สต็อกติดลบ), และการขาด Transaction พร้อมเขียน Code ใหม่ที่ใช้ Atomic Update หรือ Pessimistic Locking
+
+* **ปัญหาเดิม:** 1. **N+1 Query:** มีการคิวรี Database ซ้ำซ้อนอยู่ภายในลูป `for`
+2. **ขาด Transaction:** หากเกิด Error กลางทาง จะทำให้ข้อมูลไม่ Consistency (บางชิ้นตัดสต็อกไปแล้ว แต่ออเดอร์สร้างไม่สำเร็จ)
+3. **Race Condition:** ดึงสต็อกมาตรวจสอบบน Memory (`product.stock >= item.qty`) หากมีคนกดสั่งของชิ้นเดียวกันพร้อมกันในเสี้ยววินาที จะทำให้สต็อกถูกตัดซ้ำซ้อนจนติดลบได้
+* **วิธีแก้:** นำ `BEGIN TRANSACTION` มาครอบระบบทั้งหมด ลด N+1 ด้วยการดึงข้อมูลสต็อกครั้งเดียวด้วย `IN (...)` และเปลี่ยนมาใช้ `SELECT ... FOR UPDATE` (Pessimistic Locking) เพื่อล็อก Row ของสินค้าชิ้นนั้นๆ ป้องกันไม่ให้ Transaction อื่นเข้ามาอ่านหรือแก้ไขได้จนกว่าจะตัดสต็อกเสร็จสมบูรณ์
+
+---
+
 ## ส่วนที่ 2 — System Design & Business Logic
 
 ### ข้อ 4: Real-time Live Tracking Architecture
 
-#### 1. Data Flow Protocol (การเลือกโปรโตคอล)
-เลือกใช้สถาปัตยกรรมแบบ **Hybrid (MQTT + WebSockets)**
-* **ฝั่ง Rider App ไปยังระบบหลังบ้าน (Ingress):** เลือกใช้โปรโตคอล **MQTT** เนื่องจากเป็น Lightweight Publish/Subscribe ที่ออกแบบมาสำหรับ Mobile Network โดยเฉพาะ ช่วยประหยัดแบตเตอรี่ของไรเดอร์ที่ต้องส่งพิกัดถี่ๆ ทุก 2 วินาที และรองรับกรณีเน็ตมือถือหลุดบ่อย (Keep-Alive ต่ำ)
-* **ฝั่งหลังบ้านไปยัง Customer App (Egress):** เลือกใช้ **WebSockets** เนื่องจากแอปฝั่งลูกค้าส่วนใหญ่เปิดผ่าน Web Browser หรือ Mobile Client ที่ต้องการ Bi-directional connection แบบมาตรฐาน เชื่อมต่อเข้าสู่ API Gateway ได้ง่ายเพื่อกระจายพิกัดไปแสดงบนแผนที่แบบ Real-time
+> **โจทย์:** ออกแบบระบบที่รองรับการติดตาม Rider 2,000 คนพร้อมกัน โดยลูกค้า 10,000 คนต้องเห็นตำแหน่งขยับแบบ Real-time:
+> Data Flow: จะใช้โปรโตคอลใดระหว่าง WebSocket, gRPC, หรือ MQTT เพราะเหตุใด?
+> Storage Strategy: ตำแหน่งพิกัดที่เปลี่ยนทุก 2 วินาที ควรเก็บลง Database ประเภทใด (SQL / NoSQL / In-memory) เพื่อไม่ให้ Disk I/O เต็ม?
 
-#### 2. Storage Strategy (กลยุทธ์การจัดเก็บข้อมูล)
-การเขียนพิกัดลง Disk ของ Relational DB ทุกๆ 2 วินาที จากไรเดอร์ 2,000 คนจะทำให้เกิด I/O Bottleneck ทันที ทางแก้คือการแบ่ง Layer ข้อมูล:
-* **Hot Data Layer (พิกัดปัจจุบัน):** เก็บใน **In-memory Database (Redis)** โดยใช้ฟีเจอร์ **Redis Geospatial (`GEOADD` / `GEOPOS`)** เนื่องจากเก็บใน RAM ทำให้ความเร็วการอ่านเขียนเป็นแบบ $O(1)$ ไม่รบกวนความเร็วของ Disk และใช้คำสั่งดึงไรเดอร์รอบตัวลูกค้าได้ไวมาก
-* **Cold Data Layer (ประวัติการเดินทางหลังจบทริป):** เมื่อ Order เสร็จสิ้น ค่อยดึงประวัติเส้นทางทั้งหมดจากหน่วยความจำไปบันทึกเป็นก้อนลงใน **NoSQL Database (เช่น MongoDB หรือ TimescaleDB)** เพื่อนำไปใช้ทำ Data Analytics ย้อนหลัง โดยวิธีนี้จะไม่สร้างภาระให้กับระบบงานหลัก
+**1. Data Flow (การรับส่งข้อมูลพิกัด)**
 
----
+* **ฝั่ง Rider ส่งพิกัด (Ingress):** เลือกใช้ **MQTT** เพราะเป็นโปรโตคอลแบบ Lightweight ออกแบบมาสำหรับเครือข่ายมือถือที่ไม่เสถียร ใช้ Bandwidth ต่ำมาก ช่วยประหยัดแบตเตอรี่แม้ Rider จะต้องส่งพิกัดทุกๆ 2 วินาทีก็ตาม
+* **ฝั่งลูกค้ารอรับพิกัด (Egress):** เลือกใช้ **WebSocket** เพื่ออัปเดตตำแหน่ง Rider บนหน้าแอปแบบ Real-time เพราะรองรับการสื่อสารแบบ 2 ทาง (Bi-directional) และทำงานร่วมกับ Web/Mobile Client ได้เสถียรที่สุด
+
+**2. Storage Strategy (การเก็บข้อมูลป้องกัน Disk เต็ม)**
+
+* ตำแหน่งพิกัดที่เปลี่ยนทุก 2 วินาที (Write-heavy) จะต้องเก็บลง **In-memory Database (เช่น Redis)** โดยใช้คำสั่งกลุ่ม GEO (Geo-Spatial) เพราะการทำงานบน RAM ทำให้เขียน/อ่านได้รวดเร็วระดับมิลลิวินาที (O(1)) ช่วยแก้ปัญหา Disk I/O Bottleneck ที่จะเกิดหากเขียนลง SQL/NoSQL โดยตรง
 
 ### ข้อ 5: Rush Hour Cancellation Crisis
 
-#### 1. ฟีเจอร์ Dynamic Incentive (โบนัสแปรผันรายพื้นที่)
-เพื่อลดอัตราการยกเลิกงาน 25% ในช่วงเร่งด่วน ระบบจะคำนวณ **Supply-Demand Ratio** ในทุกๆ ตารางกิโลเมตรแบบ Real-time:
-* หากพื้นที่ใดออเดอร์ค้างสูง แต่ไรเดอร์ในบริเวณนั้นเหลือน้อย ระบบจะประกาศพื้นที่นั้นเป็น **"Surge Zone"** บนหน้าจอแอปของไรเดอร์ทันที 
-* เพิ่มค่าธรรมเนียมพิเศษให้ไรเดอร์ (เช่น +20 บาทต่อออเดอร์) โดยกำหนดเวลาจำกัดสั้นๆ เช่น 30 นาที เพื่อกระตุ้นให้ไรเดอร์ในพื้นที่ยอมเปิดรับงาน หรือดึงดูดให้ไรเดอร์นอกพื้นที่ขับเข้ามาช่วยรับงานในบริเวณนี้
+> **โจทย์:** จาก Scenario ที่ Rider ยกเลิกงานสูงถึง 25% ในช่วง Rush Hour:
+> Requirement: ออกแบบฟีเจอร์ Dynamic Incentive (โบนัสพิเศษรายพื้นที่) เพื่อดึงดูด Rider
+> Data Modeling: ออกแบบ Schema ที่เก็บประวัติการยกเลิกงาน (Cancellation Log) เพื่อวิเคราะห์พฤติกรรมทุจริต (Fraud Detection)
 
-#### 2. Data Modeling: Cancellation Log Schema (JSON Schema สำหรับตรวจจับการทุจริต)
+**1. Requirement: Dynamic Incentive (โบนัสรายพื้นที่)**
+
+* เมื่อระบบคำนวณพบว่าพื้นที่ใดมีอัตราส่วน Demand (ออเดอร์) สูงกว่า Supply (Rider) อย่างมีนัยสำคัญ ระบบจะเปลี่ยนพื้นที่นั้นเป็น **"Surge Zone"** พร้อมแสดง Heatmap บนแอป Rider และอัดฉีดเงินพิเศษแบบเรียลไทม์ (เช่น +20 บาท/ออเดอร์) ในเวลาจำกัด เพื่อดึงดูด Rider จากนอกพื้นที่ให้ขับเข้ามารับงาน
+
+**2. Data Modeling: Cancellation Log Schema**
+
+* ออกแบบ Schema เก็บประวัติอย่างละเอียด รวมถึงข้อมูล Device เพื่อนำไปวิเคราะห์ Fraud Detection (เช่น จับพฤติกรรมใช้เครื่องเดียวกันปั่นกดยกเลิกงาน):
+
 ```json
 {
-  "$schema": "[http://json-schema.org/draft-07/schema#](http://json-schema.org/draft-07/schema#)",
-  "title": "CancellationLog",
-  "type": "object",
-  "properties": {
-    "log_id": { "type": "string", "format": "uuid" },
-    "order_id": { "type": "string", "format": "uuid" },
-    "rider_id": { "type": "string" },
-    "cancellation_reason_code": { "type": "string", "enum": ["DISTANCE_TOO_FAR", "RESTAURANT_LONG_WAIT", "ACCIDENT", "PASS_ORDER"] },
-    "cancelled_by": { "type": "string", "enum": ["RIDER", "CUSTOMER", "SYSTEM"] },
-    "location": {
-      "type": "object",
-      "properties": {
-        "lat": { "type": "number" },
-        "lng": { "type": "number" }
-      },
-      "required": ["lat", "lng"]
-    },
-    "device_metadata": {
-      "type": "object",
-      "properties": {
-        "device_id": { "type": "string" },
-        "os_version": { "type": "string" },
-        "ip_address": { "type": "string" }
-      }
-    },
-    "created_at": { "type": "string", "format": "date-time" }
-  },
-  "required": ["log_id", "order_id", "rider_id", "cancellation_reason_code", "location", "created_at"]
-}
-🤖 ส่วนที่ 3 — AI Implementation & Guardrails
-ข้อ 6: AI-Powered Delivery Time Predictor
-1. System Prompt สำหรับคำนวณ ETA
-Markdown
-คุณคือ AI Engine ผู้เชี่ยวชาญด้านการคำนวณเวลาจัดส่งอาหาร (ETA) ของแพลตฟอร์ม Delivery
-จงคำนวณเวลาการจัดส่งรวม (หน่วย: นาที) โดยวิเคราะห์จากข้อมูล Input ที่ได้รับอย่างเข้มงวดตามหลักการจริง
-
-[เงื่อนไขทางธุรกิจที่ต้องนำมาคิด]
-1. สภาพอากาศ: หากฝนตกหนัก ความเร็วการเดินทางของมอเตอร์ไซค์จะลดลง 40% และให้เพิ่มเวลาในการจอดสวมชุดกันฝนอีก 5 นาที
-2. เวลาจัดเตรียมอาหาร: หากร้านอาหารเป็นประเภทปรุงสด ให้บวกเวลาเตรียมอย่างน้อย 15 นาที หากเป็นร้านฟาสต์ฟู้ดคิด 7 นาที
-3. ความเร็วเฉลี่ยไรเดอร์ในสภาวะปกติ: 30 กม./ชม. (หรือ 1 กม. ใช้เวลา 2 นาที)
-
-[รูปแบบของข้อมูลนำเข้า (Input JSON)]
-{
-  "distance_km": 10.0,
-  "weather": "heavy_rain",
-  "restaurant_type": "fresh_cooked",
-  "base_preparation_time_mins": 20
+  "log_id": "uuid",
+  "order_id": "uuid",
+  "rider_id": "string",
+  "cancelled_by": "RIDER | CUSTOMER | SYSTEM",
+  "reason": "DISTANCE_TOO_FAR | RESTAURANT_LONG_WAIT | PASS_ORDER",
+  "location": { "lat": 13.756, "lng": 100.501 },
+  "device_metadata": { "device_id": "string", "ip_address": "string" },
+  "created_at": "timestamp"
 }
 
-[กฎเหล็กในการแสดงผล]
-ให้ส่งคืนผลลัพธ์เป็น JSON Object เท่านั้น ห้ามมีข้อความเกริ่นนำหรือลงท้าย โครงสร้างข้อมูลมีดังนี้:
-{
-  "estimated_delivery_time_mins": integer,
-  "breakdown": {
-    "preparation_time_mins": integer,
-    "travel_time_mins": integer,
-    "weather_buffer_mins": integer
-  },
-  "confidence_score": float (0.0 to 1.0)
-}
-2. วิธีจัดการเมื่อ AI ทำนายเวลาผิดพลาดอย่างรุนแรง (AI Hallucination)
-ระบบวางระบบ Rule-Based Validation Layer (Sanity Check) ไว้ที่ฝั่ง Backend ก่อนนำค่าไปแสดงผล:
+```
 
-ตั้งค่า Mathematical Boundary Check: หากระยะทางจริงคือ 10 กม. ระบบจะคำนวณค่าต่ำสุดทางฟิสิกส์ที่เป็นไปได้ (เช่น ขับรถเร็วสุด 80 กม./ชม. ต้องใช้เวลาอย่างน้อย 7.5 นาที)
+---
 
-หากผลลัพธ์ของ AI ส่งกลับมาต่ำกว่าขีดจำกัดล่างนี้ (เช่น บอกว่าถึงใน 5 นาที ทั้งที่ฝนตกหนักและทางไกล) ระบบจะทำการ Auto-Reject ทันที และสลับไปใช้ Fallback Rule (Standard Matrix Calculation) คำนวณด้วยสูตรคณิตศาสตร์แบบดั้งเดิมแทน เพื่อไม่ให้ข้อมูลที่ผิดพลาดหลุดไปถึงหน้าจอแอปของลูกค้า
+## ส่วนที่ 3 — AI Implementation & Guardrails
 
-ข้อ 7: Dynamic Pricing Engine — Surge Pricing
-1. Data Flow Architecture
+### ข้อ 6: AI-Powered Delivery Time Predictor
 
+> **โจทย์:** เขียน Prompt เพื่อให้ AI คำนวณ ETA โดยใช้ข้อมูล: ระยะทาง, สภาพอากาศ (ฝนตก), และเวลาเตรียมอาหารของร้าน
+> พร้อมระบุวิธีจัดการหาก AI ทำนายเวลาผิดพลาดอย่างรุนแรง เช่น บอกว่าถึงใน 5 นาที ทั้งที่ฝนตกหนักและร้านอยู่ไกล 10 กม.
 
-2. Safety & Ethics Guardrails (การควบคุมจริยธรรมราคา)
- - เพื่อป้องกันไม่ให้ AI แนะนำราคาที่แพงเกินไปจนผิดกฎหมายควบคุมราคาหรือเอาเปรียบผู้บริโภค ระบบได้ตั้งค่า Hard-coded Guardrails บนระดับสคริปต์หลังบ้าน (Backend Layer) ที่ AI ไม่สามารถฝ่าฝืนหรือปลดล็อกเองได้:
+**1. System Prompt สำหรับให้ AI คำนวณ ETA:**
 
- - Max Multiplier Cap: กำหนดค่า Surge สูงสุดห้ามเกิน 3.0x ของราคาค่าส่งฐานปกติในทุกกรณี
+```text
+Role: คุณคือ AI ประเมินเวลาจัดส่งอาหาร (ETA) ของระบบ Delivery
+Task: คำนวณเวลาจัดส่งรวม (นาที) จากข้อมูล Input โดยคำนึงถึงเงื่อนไขทางธุรกิจอย่างเคร่งครัด:
+1. สภาพอากาศ: หากฝนตกหนัก ให้ลดความเร็วเดินทางลง 40% และบวกเวลาสวมชุดกันฝน 5 นาที
+2. การเตรียมอาหาร: ร้านปรุงสด บวกเวลา +15 นาที / ร้านฟาสต์ฟู้ด บวกเวลา +7 นาที
+3. ความเร็วปกติ: 30 กม./ชม. (ระยะทาง 1 กม. = 2 นาที)
 
- - Absolute Price Cap: กำหนดเพดานราคาค่าส่งสูงสุดล็อกไว้ที่ 150 บาท ต่อหนึ่งการสั่งซื้อ แม้ดีมานด์จะสูงมากก็ตาม
+Output: ห้ามมีข้อความเกริ่นนำ ตอบกลับเป็น JSON Format เท่านั้น ประกอบด้วย "total_eta_mins" และออบเจ็กต์ "breakdown_mins" ที่แยกเวลาเดินทาง, เวลาเตรียมอาหาร, และเวลาเผื่อสภาพอากาศ
 
- - Surge Cool-down Rate-limit: ราคาค่าจัดส่งในพื้นที่เดิมจะอัปเดตเพิ่มขึ้นได้สูงสุดไม่เกิน 15% ในทุกๆ 5 นาที เพื่อป้องกันราคาดีดตัวกระทันหัน
+```
+
+**2. การจัดการกรณี AI ทำนายผิดพลาดรุนแรง (Hallucination)**
+
+* สร้าง **(Rule-based)** ไว้ที่ฝั่ง Backend เพื่อเช็คค่าต่ำสุด
+* หากผลลัพธ์จาก AI ต่ำกว่าความเป็นจริง (เช่น ระยะทาง 10 กม. ฝนตกหนัก แต่บอกใช้เวลา 5 นาที) ระบบจะทำการ **Auto-Reject** ค่าของ AI ทันที และเปิดโหมด Fallback สลับไปใช้สูตรคำนวณระยะทาง (Standard Matrix) เพื่อความถูกต้องและปลอดภัย
+
+### ข้อ 7: Dynamic Pricing Engine — Surge Pricing
+
+> **โจทย์:** ออกแบบฟีเจอร์ปรับค่าส่งตาม Demand/Supply:
+> Architecture: เขียน Diagram แสดงการไหลของข้อมูลจาก Rider App ไปยัง AI Model และสะท้อนกลับไปที่ Customer App
+> Safety & Ethics: หาก AI แนะนำค่าส่งที่แพงเกินไปจนผิดกฎหมายคุ้มครองผู้บริโภค จะวาง Hard-coded Guardrails อย่างไร?
+
+**1. Architecture Diagram (การไหลของข้อมูล)**
+
+```text
+[Rider App] --(ส่งพิกัดผ่าน MQTT)--> [API Gateway] 
+                                         |
+[AI Pricing Model] <--(ดึงข้อมูล Demand/Supply แบบ Real-time เพื่อคำนวณราคา)
+                                         |
+[Redis Cache] --(อัปเดตราคา Surge ใหม่ทุก 1 นาที)--> [Customer App] (รับการแจ้งเตือนค่าส่งใหม่ผ่าน WebSocket)
+
+```
+
+**2. Safety & Ethics (การตั้ง Guardrails คุ้มครองผู้บริโภค)**
+ป้องกันเหตุการณ์ AI ตัดสินใจตั้งราคาแพงเกินไปจนผิดกฎหมาย (Price Gouging) โดยฝัง Rule ไว้ที่ Backend Layer ซึ่ง AI ไม่สามารถ Overwrite ได้:
+
+* **Max Multiplier (จำกัดตัวคูณ):** ราคา Surge สูงสุดห้ามเกิน **3.0 เท่า** ของราคาค่าส่งฐานปกติ
+* **Absolute Cap (เพดานราคาสูงสุด):** ล็อกค่าส่งรวมสูงสุดไว้ที่ไม่เกิน **150 บาท** ต่อออเดอร์ในทุกกรณี ไม่ว่า Demand จะพุ่งสูงแค่ไหนก็ตาม
+* **Cool-down Rate (จำกัดความผันผวน):** ค่าส่งจะปรับขึ้นได้สูงสุดไม่เกิน **15% ภายในกรอบเวลา 5 นาที** เพื่อป้องกันการเกิด Price Shock ที่สร้างความตื่นตระหนกให้กับลูกค้า
+
