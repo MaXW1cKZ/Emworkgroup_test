@@ -177,10 +177,8 @@ ETA ต้องไม่น้อยกว่า 30 นาที
 
 **1. Architecture Diagram (การไหลของข้อมูล)**
 
-```text
-<img width="483" height="378" alt="image" src="https://github.com/user-attachments/assets/c0b7f0e3-42b4-4128-937e-4daf8eb88fad" />
+<img width="446" height="341" alt="Architecture" src="https://github.com/user-attachments/assets/714e27fd-3e4c-468b-9249-9a1f0b5b485c" />
 
-```
 
 **2. Safety & Ethics (การตั้ง Guardrails คุ้มครองผู้บริโภค)**
 ป้องกันเหตุการณ์ AI ตัดสินใจตั้งราคาแพงเกินไปจนผิดกฎหมาย โดยฝัง Rule ไว้ที่ Backend Layer ซึ่ง AI ไม่สามารถ Overwrite ได้:
